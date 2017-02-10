@@ -2,10 +2,16 @@ package com.singh.maharshi.ilovezappos2;
 
 import android.animation.AnimatorSet;
 import android.animation.ObjectAnimator;
+import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.databinding.DataBindingUtil;
 import android.graphics.Paint;
+import android.nfc.NdefMessage;
+import android.nfc.NdefRecord;
+import android.nfc.NfcAdapter;
+import android.nfc.NfcEvent;
 import android.os.Bundle;
+import android.os.Parcelable;
 import android.support.design.widget.CoordinatorLayout;
 import android.support.design.widget.FloatingActionButton;
 import android.support.design.widget.Snackbar;
@@ -28,7 +34,7 @@ import retrofit2.converter.gson.GsonConverterFactory;
 
 import static android.R.color.white;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements NfcAdapter.CreateNdefMessageCallback{
 
     SearchView searchView;
     private ActivityMainBinding binding;
@@ -38,6 +44,8 @@ public class MainActivity extends AppCompatActivity {
     private FloatingActionButton favorite;
     boolean flag = true;
     CoordinatorLayout coordinatorLayout;
+    NfcAdapter mAdapter;
+    String queryBackup;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -48,6 +56,7 @@ public class MainActivity extends AppCompatActivity {
         coordinatorLayout = (CoordinatorLayout) findViewById(R.id.clayout);
         fab = (FloatingActionButton) findViewById(R.id.fab);
 
+        mAdapter = NfcAdapter.getDefaultAdapter(this);
         fab.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
@@ -84,6 +93,25 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onClick(View view) {
                 //Toast.makeText(getBaseContext(), "Floating action button clicked", Toast.LENGTH_LONG).show();
+                if (mAdapter == null) {
+                    Snackbar snackbar = Snackbar
+                            .make(coordinatorLayout, "Sorry, this device does not support NFC!", Snackbar.LENGTH_LONG);
+                    snackbar.show();
+//                    mEditText.setText("Sorry this device does not have NFC.");
+                    return;
+                }
+
+                if (!mAdapter.isEnabled()) {
+//                    Toast.makeText(this, "Please enable NFC via Settings.", Toast.LENGTH_LONG).show();
+                    Snackbar snackbar = Snackbar
+                            .make(coordinatorLayout, "Please enable NFC via Settings!", Snackbar.LENGTH_LONG);
+                    snackbar.show();
+                }else{
+                    Snackbar snackbar = Snackbar
+                            .make(coordinatorLayout, "Please put both devices back to back!", Snackbar.LENGTH_LONG);
+                    snackbar.show();
+                }
+
             }
         });
         favorite = (FloatingActionButton) findViewById(R.id.favorite);
@@ -118,6 +146,7 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public boolean onQueryTextSubmit(final String query) {
+                queryBackup = query;
                 fab.setImageResource(R.drawable.cart1);
                 fab.setClickable(true);
                 flag = true;
@@ -179,5 +208,88 @@ public class MainActivity extends AppCompatActivity {
                 return false;
             }
         });
+        mAdapter.setNdefPushMessageCallback(this, this);
+    }
+
+    @Override
+    public NdefMessage createNdefMessage(NfcEvent nfcEvent) {
+//        String message = "Hello there";
+        String message = queryBackup;
+        NdefMessage ndefMessage = null;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.JELLY_BEAN) {
+            NdefRecord ndefRecord = NdefRecord.createMime("text/plain", message.getBytes());
+            ndefMessage = new NdefMessage(ndefRecord);
+        }
+        return ndefMessage;
+    }
+
+    @Override
+    protected void onResume(){
+        super.onResume();
+        Intent intent = getIntent();
+        if (NfcAdapter.ACTION_NDEF_DISCOVERED.equals(intent.getAction())) {
+            Parcelable[] rawMessages = intent.getParcelableArrayExtra(
+                    NfcAdapter.EXTRA_NDEF_MESSAGES);
+
+            NdefMessage message = (NdefMessage) rawMessages[0];
+            final String query = new String(message.getRecords()[0].getPayload());
+            fab.setImageResource(R.drawable.cart1);
+            fab.setClickable(true);
+            flag = true;
+            favorite.setImageResource(R.drawable.like1);
+            favorite.setBackgroundTintList(ColorStateList.valueOf(getResources().getColor(R.color.red)));
+            //Toast.makeText(getBaseContext(), query, Toast.LENGTH_LONG).show();
+            Retrofit retrofit = new Retrofit.Builder()
+                    .baseUrl("https://api.zappos.com")
+                    .addConverterFactory(GsonConverterFactory.create())
+                    .build();
+
+            ProductService service = retrofit.create(ProductService.class);
+            Call call = service.getProducts(query);
+            call.enqueue(new Callback<Products>() {
+                @Override
+                public void onResponse(Call<Products> call, Response<Products> response) {
+                    Products product = response.body();
+                    if (product == null || product.getProductList().size() == 0){
+                        vm.setName("Sorry, We could not find any product named " + query + ". Please try again!");
+                        vm.setPrice("");
+                        vm.setThumbnail("");
+                        vm.setOff("");
+                        vm.setOriginalPrice("");
+                        vm.setExists(false);
+                    }
+                    else{
+                        TextView tv = (TextView) findViewById(R.id.originalPrice);
+                        tv.setPaintFlags(tv.getPaintFlags() & (~ Paint.STRIKE_THRU_TEXT_FLAG));
+                        Product item = product.getProductList().get(0);
+                        vm.setName(item.getBrand() + " " + item.getName());
+                        vm.setPrice(item.getPrice());
+                        System.out.print(item.getPrice());
+                        vm.setThumbnail(item.getThumbnail());
+                        vm.setOff(item.getOff() + " OFF");
+                        vm.setOriginalPrice(item.getOriginalPrice());
+                        vm.setExists(true);
+                        if (!item.getOff().equals("0%")){
+                            tv.setPaintFlags(tv.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG);
+                        }
+                    }
+                }
+
+                @Override
+                public void onFailure(Call<Products> call, Throwable t) {
+                    vm.setName("Trouble connecting to the server. Please ensure that the Internet is working!");
+                    vm.setPrice("");
+                    vm.setThumbnail("");
+                    vm.setOff("");
+                    vm.setOriginalPrice("");
+                    vm.setExists(false);
+                }
+            });
+//            mTextView.setText(new String(message.getRecords()[0].getPayload()));
+
+        } else {
+//            mTextView.setText("Waiting for NDEF Message");
+        }
+
     }
 }
