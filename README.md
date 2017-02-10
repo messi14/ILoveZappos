@@ -1,0 +1,2 @@
+# ILoveZappos
+A shopping app that takes in user search query and displays a product page matching the query. This project makes use of Retrofit library for data binding, Picasso for image downloads. Material Design style guide has been followed while developing the UI. It also includes few simple animations, uses snackbar for displaying simple messages. One can share the product page with another device through NFC. Both devices should be able to support NFC to share the product successfully.
